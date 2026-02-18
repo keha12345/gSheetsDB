@@ -56,13 +56,27 @@ export class SheetDB {
 class Document {
   constructor(data, collection, db) {
     Object.assign(this, data);
+    // Приватные мета-данные, которые не видны при переборе ключей
     Object.defineProperty(this, '_meta', { value: { collection, db }, enumerable: false });
   }
+
+  // Возвращает чистый объект без служебных полей драйвера
+  toObject() {
+    const obj = { ...this };
+    // _row нам обычно на фронте не нужен, это служебное поле для поиска строки
+    delete obj._row; 
+    return obj;
+  }
+
+  // Позволяет JSON.stringify(doc) сразу выдавать чистые данные
+  toJSON() {
+    return this.toObject();
+  }
+
   async save() {
     const { collection, db } = this._meta;
-    const updateData = { ...this };
-    delete updateData._id; 
-    delete updateData._row;
+    const updateData = this.toObject();
+    delete updateData._id; // ID не обновляем, он в фильтре
     return db.collection(collection).updateOne({ _id: this._id }, updateData);
   }
 }`;
