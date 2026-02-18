@@ -1,5 +1,5 @@
 {
-  "name": "sheetdb-sdk",
+  "name": "gsheetdb",
   "version": "1.0.0",
   "main": "sheetdb-node.js",
   "exports": {
