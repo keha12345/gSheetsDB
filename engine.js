@@ -53,31 +53,36 @@ export class SheetDB {
   }
 }
 
-class Document {
-  constructor(data, collection, db) {
+constructor(data, collection, db) {
     Object.assign(this, data);
-    // Приватные мета-данные, которые не видны при переборе ключей
+    // Приватные мета-данные, не участвуют в циклах и сериализации
     Object.defineProperty(this, '_meta', { value: { collection, db }, enumerable: false });
   }
 
-  // Возвращает чистый объект без служебных полей драйвера
+  // Возвращает чистый объект без служебных полей
   toObject() {
     const obj = { ...this };
-    // _row нам обычно на фронте не нужен, это служебное поле для поиска строки
     delete obj._row; 
     return obj;
   }
 
-  // Позволяет JSON.stringify(doc) сразу выдавать чистые данные
+  // Для корректного JSON.stringify()
   toJSON() {
     return this.toObject();
   }
 
+  // Обновление текущего документа
   async save() {
     const { collection, db } = this._meta;
     const updateData = this.toObject();
-    delete updateData._id; // ID не обновляем, он в фильтре
+    delete updateData._id; // ID используем только для поиска
     return db.collection(collection).updateOne({ _id: this._id }, updateData);
+  }
+
+  // Удаление текущего документа
+  async delete() {
+    const { collection, db } = this._meta;
+    return db.collection(collection).deleteMany({ _id: this._id });
   }
 }`;
   return ContentService.createTextOutput(sdk).setMimeType(ContentService.MimeType.JAVASCRIPT);
