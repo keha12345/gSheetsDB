@@ -1,0 +1,11 @@
+{
+  "name": "sheetdb-sdk",
+  "version": "1.0.0",
+  "main": "sheetdb-node.js",
+  "exports": {
+    ".": {
+      "import": "./sheetdb-node.js",
+      "require": "./sheetdb-node.js"
+    }
+  }
+}
