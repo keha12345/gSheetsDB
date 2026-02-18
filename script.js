@@ -6,179 +6,186 @@
 
 const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-/**
- * GET: Раздает SDK драйвер с прошитым URL
- */
 function doGet(e) {
   const serviceUrl = ScriptApp.getService().getUrl();
-  
   const sdk = `
-/**
- * gSheetsDB Client SDK
- */
 export class SheetDB {
-  constructor(url = "${serviceUrl}") {
-    this.url = url;
+  constructor(url = "${serviceUrl}") { this.url = url; }
+
+  // Возвращает статус всех коллекций и их полей
+  async getSchema() {
+    return this._request('getSchema');
   }
 
   collection(name) {
-    const request = async (action, payload = {}) => {
-      const response = await fetch(this.url, {
-        method: 'POST',
-        body: JSON.stringify({ collection: name, action, ...payload })
-      });
-      const result = await response.json();
-      if (result.status === 'error') throw new Error(result.message);
-      return result.data;
-    };
+    const db = this;
+    const req = (action, payload) => this._request(action, { collection: name, ...payload });
 
     return {
-      find: (query = {}) => request('find', { query }),
-      findOne: (query = {}) => request('findOne', { query }),
-      insertOne: (data) => request('insertOne', { data }),
-      updateOne: (query, data) => request('updateOne', { query, data }),
-      deleteMany: (query = {}) => request('deleteMany', { query })
+      find: async (query = {}, options = {}) => {
+        // Если переданы функции sort или where, конвертируем их в строки
+        if (typeof query === 'function') query = { $where: query.toString() };
+        if (query.$where && typeof query.$where === 'function') query.$where = query.$where.toString();
+        if (options.sort && typeof options.sort === 'function') options.sort = options.sort.toString();
+
+        const docs = await req('find', { query, options });
+        return docs.map(d => new Document(d, name, db));
+      },
+      findOne: async (query = {}) => {
+        const docs = await req('find', { query, options: { limit: 1 } });
+        return docs.length ? new Document(docs[0], name, db) : null;
+      },
+      insertOne: async (data) => {
+        const d = await req('insertOne', { data });
+        return new Document(d, name, db);
+      },
+      updateOne: (query, data) => req('updateOne', { query, data }),
+      deleteMany: (query) => req('deleteMany', { query })
     };
   }
-}
-  `;
 
-  return ContentService.createTextOutput(sdk)
-    .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  async _request(action, body = {}) {
+    const res = await fetch(this.url, { method: 'POST', body: JSON.stringify({ action, ...body }) });
+    const r = await res.json();
+    if (r.status === 'error') throw new Error(r.message);
+    return r.data;
+  }
 }
 
-/**
- * POST: Обработка NoSQL операций
- */
+class Document {
+  constructor(data, collection, db) {
+    Object.assign(this, data);
+    Object.defineProperty(this, '_meta', { value: { collection, db }, enumerable: false });
+  }
+  async save() {
+    const { collection, db } = this._meta;
+    const updateData = { ...this };
+    delete updateData._id; 
+    delete updateData._row;
+    return db.collection(collection).updateOne({ _id: this._id }, updateData);
+  }
+}`;
+  return ContentService.createTextOutput(sdk).setMimeType(ContentService.MimeType.JAVASCRIPT);
+}
+
 function doPost(e) {
   try {
-    const request = JSON.parse(e.postData.contents);
-    const { action, collection, query, data } = request;
-    
-    if (!collection) throw new Error("Collection name is required");
-    
-    const sheet = getOrCreateSheet(collection);
+    const req = JSON.parse(e.postData.contents);
+    if (req.action === 'getSchema') return response({ status: 'success', data: getSchema() });
+
+    const sheet = getOrCreateSheet(req.collection);
     const engine = new DatabaseEngine(sheet);
     let result;
 
-    switch (action) {
-      case 'find': result = engine.find(query); break;
-      case 'findOne': result = engine.find(query)[0] || null; break;
-      case 'insertOne': result = engine.insertOne(data); break;
-      case 'updateOne': result = engine.updateOne(query, data); break;
-      case 'deleteMany': result = engine.deleteMany(query); break;
-      default: throw new Error("Action " + action + " not supported");
+    switch (req.action) {
+      case 'find': result = engine.find(req.query, req.options || {}); break;
+      case 'insertOne': result = engine.insertOne(req.data); break;
+      case 'updateOne': result = engine.updateOne(req.query, req.data); break;
+      case 'deleteMany': result = engine.deleteMany(req.query); break;
+      default: throw "Unknown action";
+    }
+    return response({ status: 'success', data: result });
+  } catch (err) {
+    return response({ status: 'error', message: err.toString() });
+  }
+}
+
+function getSchema() {
+  return ss.getSheets().map(s => ({
+    collection: s.getName(),
+    count: s.getLastRow() - 1,
+    fields: s.getRange(1, 1, 1, s.getLastColumn()).getDisplayValues()[0].filter(Boolean)
+  }));
+}
+
+class DatabaseEngine {
+  constructor(sheet) { this.sheet = sheet; }
+
+  getDocs() {
+    const vals = this.sheet.getDataRange().getDisplayValues();
+    const head = vals.shift() || [];
+    return vals.map((row, i) => {
+      const d = { _row: i + 2 };
+      head.forEach((h, j) => d[h] = row[j]);
+      return d;
+    });
+  }
+
+  find(query, options) {
+    let docs = this.getDocs();
+
+    // 1. Фильтрация
+    if (query.$where) {
+      const filterFn = new Function('doc', 'return (' + query.$where + ')(doc)');
+      docs = docs.filter(doc => filterFn(doc));
+    } else {
+      docs = docs.filter(doc => this.match(doc, query));
     }
 
-    return renderJson({ status: 'success', data: result });
-  } catch (err) {
-    return renderJson({ status: 'error', message: err.toString() });
-  }
-}
+    // 2. Сортировка
+    if (options.sort) {
+      const sortFn = new Function('a', 'b', 'return (' + options.sort + ')(a, b)');
+      docs.sort((a, b) => sortFn(a, b));
+    }
 
-// --- ВНУТРЕННИЕ ФУНКЦИИ ---
+    // 3. Лимит
+    if (options.limit) docs = docs.slice(0, options.limit);
 
-function getOrCreateSheet(name) {
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    // Инициализируем базовыми системными колонками
-    sheet.appendRow(['_id', 'createdAt']);
-    sheet.getRange(1, 1, 1, 2).setFontWeight("bold").setBackground("#f3f3f3");
-  }
-  return sheet;
-}
-
-function renderJson(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * Ядро обработки данных
- */
-class DatabaseEngine {
-  constructor(sheet) {
-    this.sheet = sheet;
+    return docs;
   }
 
-  // Считывает таблицу и превращает её в массив объектов
-  getDocuments() {
-    const range = this.sheet.getDataRange();
-    const values = range.getValues();
-    const headers = values.shift() || [];
-    
-    return values.map((row, index) => {
-      const doc = { _row: index + 2 }; // Сохраняем номер строки для обновлений
-      headers.forEach((header, i) => {
-        doc[header] = row[i];
-      });
-      return doc;
+  match(doc, query) {
+    return Object.keys(query).every(key => {
+      const val = query[key];
+      const docVal = doc[key];
+      if (val && typeof val === 'object') {
+        if (val.$gt !== undefined) return docVal > val.$gt;
+        if (val.$lt !== undefined) return docVal < val.$lt;
+        if (val.$regex !== undefined) return new RegExp(val.$regex, val.$options || '').test(docVal);
+        if (val.$startsWith !== undefined) return String(docVal).startsWith(val.$startsWith);
+        if (val.$endsWith !== undefined) return String(docVal).endsWith(val.$endsWith);
+      }
+      return docVal == val;
     });
   }
 
-  // Поиск по объекту-фильтру
-  find(query) {
-    const docs = this.getDocuments();
-    return docs.filter(doc => 
-      Object.keys(query).every(key => doc[key] == query[key])
-    );
-  }
-
-  // Вставка документа с авто-созданием колонок
   insertOne(data) {
-    const headers = this.sheet.getRange(1, 1, 1, Math.max(this.sheet.getLastColumn(), 1)).getValues()[0];
-    
-    // Генерируем ID и время, если их нет
+    const head = this.sheet.getRange(1, 1, 1, Math.max(this.sheet.getLastColumn(), 1)).getDisplayValues()[0];
     data._id = data._id || 'id_' + Math.random().toString(36).substr(2, 9);
     data.createdAt = data.createdAt || new Date();
-
-    // Проверяем новые поля и расширяем таблицу
-    Object.keys(data).forEach(key => {
-      if (headers.indexOf(key) === -1) {
-        this.sheet.getRange(1, headers.length + 1).setValue(key)
-            .setFontWeight("bold").setBackground("#f3f3f3");
-        headers.push(key);
+    Object.keys(data).forEach(k => {
+      if (head.indexOf(k) === -1) {
+        this.sheet.getRange(1, head.length + 1).setValue(k).setFontWeight("bold");
+        head.push(k);
       }
     });
-
-    // Формируем строку по порядку заголовков
-    const row = headers.map(h => data[h] !== undefined ? data[h] : "");
-    this.sheet.appendRow(row);
+    this.sheet.appendRow(head.map(h => data[h] !== undefined ? data[h] : ""));
     return data;
   }
 
-  // Обновление всех найденных по запросу документов
-  updateOne(query, updateData) {
-    const docs = this.find(query);
-    if (docs.length === 0) return { modifiedCount: 0 };
-
-    const headers = this.sheet.getRange(1, 1, 1, this.sheet.getLastColumn()).getValues()[0];
-
-    docs.forEach(doc => {
-      Object.keys(updateData).forEach(key => {
-        let colIdx = headers.indexOf(key);
-        // Если в обновлении новое поле — создаем колонку
-        if (colIdx === -1) {
-          this.sheet.getRange(1, headers.length + 1).setValue(key)
-              .setFontWeight("bold").setBackground("#f3f3f3");
-          headers.push(key);
-          colIdx = headers.length - 1;
+  updateOne(query, update) {
+    const targets = this.find(query, {});
+    const head = this.sheet.getRange(1, 1, 1, this.sheet.getLastColumn()).getDisplayValues()[0];
+    targets.forEach(doc => {
+      Object.keys(update).forEach(k => {
+        let col = head.indexOf(k);
+        if (col === -1) {
+          this.sheet.getRange(1, head.length + 1).setValue(k).setFontWeight("bold");
+          head.push(k); col = head.length - 1;
         }
-        this.sheet.getRange(doc._row, colIdx + 1).setValue(updateData[key]);
+        this.sheet.getRange(doc._row, col + 1).setValue(update[k]);
       });
     });
-
-    return { modifiedCount: docs.length };
+    return { modified: targets.length };
   }
+}
 
-  // Удаление строк
-  deleteMany(query) {
-    const docs = this.find(query);
-    // Удаляем с конца, чтобы не сбивать индексы строк
-    docs.sort((a, b) => b._row - a._row).forEach(doc => {
-      this.sheet.deleteRow(doc._row);
-    });
-    return { deletedCount: docs.length };
-  }
+function getOrCreateSheet(name) {
+  let s = ss.getSheetByName(name);
+  if (!s) { s = ss.insertSheet(name); s.appendRow(['_id', 'createdAt']).setFontWeight("bold"); }
+  return s;
+}
+
+function response(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
