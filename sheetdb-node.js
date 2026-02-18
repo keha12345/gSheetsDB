@@ -53,4 +53,12 @@ class Document {
   }
 }
 
-module.exports = { SheetDB };
+// Для Node.js (CommonJS / require)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { SheetDB, Document };
+}
+// Для современных систем (ESM / import)
+if (typeof exports !== 'undefined') {
+    exports.SheetDB = SheetDB;
+    exports.Document = Document;
+}
