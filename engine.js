@@ -32,9 +32,9 @@ export class SheetDB {
         const docs = await req('find', { query, options });
         return docs.map(d => new Document(d, name, db));
       },
-      findOne: async (query = {}) => {
-        const docs = await req('find', { query, options: { limit: 1 } });
-        return docs.length ? new Document(docs[0], name, db) : null;
+      findOne: async (query = {}, options = {}) => {
+        const arr = await this.find(query,{...options, limit: 1 });
+        return arr[0]||null;
       },
       insertOne: async (data) => {
         const d = await req('insertOne', { data });
