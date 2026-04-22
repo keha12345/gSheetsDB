@@ -40,7 +40,7 @@ export class SheetDB {
         const d = await req('insertOne', { data });
         return new Document(d, name, db);
       },
-      updateOne: (query, data) => req('updateOne', { query, data }),
+      update: (query, data) => req('updateOne', { query, data }),
       deleteMany: (query) => req('deleteMany', { query })
     };
   }
@@ -204,7 +204,7 @@ class DatabaseEngine {
     return data;
   }
 
-  updateOne(query, update) {
+  update(query, update) {
     const targets = this.find(query, {});
     const head = this.sheet.getRange(1, 1, 1, Math.max(1, this.sheet.getLastColumn())).getValues()[0].map(String);
     targets.forEach(doc => {
