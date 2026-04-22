@@ -258,7 +258,7 @@ const schema = await db.getSchema();
 await Players.deleteMany({ status: "banned" });
 
 // Очистить всю коллекцию (будьте осторожны!)
-await Players.deleteMany({}); 
+await Players.delete({}); 
 
 ```
 
