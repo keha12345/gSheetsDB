@@ -73,7 +73,7 @@ class Document {
     const { collection, db } = this._meta;
     const updateData = this.toObject();
     delete updateData._id;
-    return db.collection(collection).updateOne({ _id: this._id }, updateData);
+    return db.collection(collection).update({ _id: this._id }, updateData);
   }
 
   async delete() {
@@ -100,8 +100,8 @@ function doPost(e) {
     switch (req.action) {
       case 'find': result = engine.find(req.query || {}, req.options || {}); break;
       case 'insertOne': result = engine.insertOne(req.data || {}); break;
-      case 'updateOne': result = engine.updateOne(req.query || {}, req.data || {}); break;
-      case 'deleteMany': result = engine.deleteMany(req.query || {}); break;
+      case 'update': result = engine.update(req.query || {}, req.data || {}); break;
+      case 'delete': result = engine.delete(req.query || {}); break;
       default: throw "Unknown action: " + req.action;
     }
     return response({ status: 'success', data: result });
