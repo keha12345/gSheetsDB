@@ -21,8 +21,8 @@ class SheetDB {
         const d = await req('insertOne', { data });
         return new Document(d, name, db);
       },
-      updateOne: (query, data) => req('updateOne', { query, data }),
-      deleteMany: (query) => req('deleteMany', { query })
+      update: (query, data) => req('update', { query, data }),
+      delete: (query) => req('delete', { query })
     };
   }
 
@@ -49,7 +49,7 @@ class Document {
     const { collection, db } = this._meta;
     const updateData = this.toObject();
     delete updateData._id;
-    return db.collection(collection).updateOne({ _id: this._id }, updateData);
+    return db.collection(collection).update({ _id: this._id }, updateData);
   }
 }
 
