@@ -40,8 +40,8 @@ export class SheetDB {
         const d = await req('insertOne', { data });
         return new Document(d, name, db);
       },
-      update: (query, data) => req('updateOne', { query, data }),
-      deleteMany: (query) => req('deleteMany', { query })
+      update: (query, data) => req('update', { query, data }),
+      delete: (query) => req('delete', { query })
     };
   }
 
@@ -78,7 +78,7 @@ class Document {
 
   async delete() {
     const { collection, db } = this._meta;
-    return db.collection(collection).deleteMany({ _id: this._id });
+    return db.collection(collection).delete({ _id: this._id });
   }
 }`;
   return ContentService.createTextOutput(sdk).setMimeType(ContentService.MimeType.JAVASCRIPT);
@@ -220,7 +220,7 @@ class DatabaseEngine {
     return { modifiedCount: targets.length };
   }
 
-  deleteMany(query) {
+  delete(query) {
     const targets = this.find(query, {});
     targets.sort((a, b) => b._row - a._row).forEach(doc => this.sheet.deleteRow(doc._row));
     return { deletedCount: targets.length };
