@@ -195,7 +195,7 @@ const lastRecord = await Players.find({}, {
 #### Массовое обновление
 
 ```javascript
-await Players.updateOne(
+await Players.update(
   { status: "pending" }, // Фильтр
   { status: "active", confirmedAt: new Date().toISOString() } // Новые данные
 );
