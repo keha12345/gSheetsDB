@@ -88,7 +88,10 @@ class Document {
  * POST: Обработка NoSQL операций
  */
 function doPost(e) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
+    
     const req = JSON.parse(e.postData.contents);
     if (req.action === 'getSchema') return response({ status: 'success', data: getSchema() });
     if (!req.collection) throw "Collection name is required";
@@ -107,6 +110,8 @@ function doPost(e) {
     return response({ status: 'success', data: result });
   } catch (err) {
     return response({ status: 'error', message: err.toString() });
+  }finally {
+    lock.releaseLock();
   }
 }
 
